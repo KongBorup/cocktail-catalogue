@@ -1,23 +1,16 @@
-use std::sync::{Arc, Mutex};
-
-mod database;
-mod server;
-mod schema;
-mod utils;
-
-const DB_LOCATION: &str = "test.db";
+use cocktail_catalogue_backend::{configuration::CONFIG, server};
+use sqlx::PgPool;
+use std::net::TcpListener;
 
 // FIXME: Don't return Result here.. Handle the error! Do something fancy like
 // sending myself a message if everything crashes or simply printing the issue.
 #[actix_rt::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let db = Mutex::new(database::Database::open(DB_LOCATION)?);
+async fn main() -> std::io::Result<()> {
+    let address = format!("{}:{}", CONFIG.server_host, CONFIG.server_port);
+    let listener = TcpListener::bind(&address)?;
+    let db_pool = PgPool::connect(&CONFIG.database.connection_string())
+        .await
+        .expect("failed to connect to postgres");
 
-    let sch = Arc::new(schema::create_schema());
-    let ctx = Arc::new(schema::Context { db });
-
-    server::start(sch, ctx)?.await?;
-
-    Ok(())
+    server::start(listener, db_pool)?.await
 }
-

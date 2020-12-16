@@ -4,13 +4,27 @@ version = "0.1.0"
 authors = ["KongBorup <avborup@gmail.com>"]
 edition = "2018"
 
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+path = "src/main.rs"
+name = "app"
+
 [dependencies]
-rusqlite = { version = "0.21.0", features = [ "bundled" ] }
-serde = { version = "1.0.103", features = [ "derive" ] }
-serde_rusqlite = "0.23.0"
-juniper = "0.14.2"
-actix-web = "2.0.0"
-actix-rt = "1.0.0"
+juniper = "0.15"
+actix-web = "3"
+actix-rt = "1.1"
+sqlx = { version = "0.4", default-features = false, features = [ "runtime-tokio-native-tls", "macros", "postgres", "uuid", "chrono", "migrate" ] }
 env_logger = "0.7.1"
+config = "0.10.1"
+lazy_static = "1.4.0"
+uuid = { version = "0.8", features = [ "v4" ] }
+chrono = "0.4"
+serde = { version = "1.0.103", features = [ "derive" ] }
 serde_json = "1.0.44"
 serde_derive = "1.0.103"
+
+[dev-dependencies]
+tokio = "0.2.22"
+reqwest = { version = "0.10.9", features = [ "json" ] }

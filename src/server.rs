@@ -1,55 +1,67 @@
-use std::io;
-use std::sync::Arc;
-
-use actix_web::{middleware, web, App, Error, HttpResponse, HttpServer};
+use crate::configuration::CONFIG;
+use crate::schema;
+use actix_web::{get, middleware, post, web, App, Error, HttpResponse, HttpServer, Responder};
 use juniper::http::graphiql::graphiql_source;
 use juniper::http::GraphQLRequest;
+use sqlx::PgPool;
+use std::io;
+use std::net::TcpListener;
+use std::sync::Arc;
 
-use crate::schema;
+pub fn start(listener: TcpListener, db_pool: PgPool) -> io::Result<actix_web::dev::Server> {
+    // Initialising env-logger multiple times panics, which breaks tests
+    // std::env::set_var("RUST_LOG", "actix_web=info");
+    // env_logger::init();
 
-const HOST: &str = "127.0.0.1:8080";
+    let sch = web::Data::new(Arc::new(schema::create_schema()));
+    let ctx = web::Data::new(Arc::new(schema::Context { db: db_pool }));
 
+    let server = HttpServer::new(move || {
+        App::new()
+            .app_data(sch.clone())
+            .app_data(ctx.clone())
+            .wrap(middleware::Logger::default())
+            .service(graphql)
+            .service(graphiql)
+            .service(health_check)
+    })
+    .listen(listener)?
+    .run();
+
+    Ok(server)
+}
+
+#[post("/graphql")]
+async fn graphql(
+    sch: web::Data<Arc<schema::Schema>>,
+    ctx: web::Data<Arc<schema::Context>>,
+    data: web::Json<GraphQLRequest>,
+) -> Result<HttpResponse, Error> {
+    let ret = data.execute(&sch, &ctx).await;
+    let json_str = serde_json::to_string(&ret)?;
+    let res = HttpResponse::Ok()
+        .content_type("application/json")
+        .body(json_str);
+
+    Ok(res)
+}
+
+#[get("/graphiql")]
 async fn graphiql() -> HttpResponse {
-    let html = graphiql_source(&format!("http://{}/graphql", HOST));
+    let html = graphiql_source(
+        &format!(
+            "http://{}:{}/graphql",
+            CONFIG.server_host, CONFIG.server_port
+        ),
+        None,
+    );
 
     HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
         .body(html)
 }
 
-async fn graphql(
-    sch: web::Data<Arc<schema::Schema>>,
-    ctx: web::Data<Arc<schema::Context>>,
-    data: web::Json<GraphQLRequest>,
-) -> Result<HttpResponse, Error> {
-    let res = web::block(move || {
-        let ret = data.execute(&sch, &ctx);
-        Ok::<_, serde_json::error::Error>(serde_json::to_string(&ret)?)
-    })
-    .await?;
-
-    Ok(HttpResponse::Ok()
-        .content_type("application/json")
-        .body(res))
+#[get("/health_check")]
+async fn health_check() -> impl Responder {
+    HttpResponse::Ok()
 }
-
-pub fn start(schema: Arc<schema::Schema>, ctx: Arc<schema::Context>) -> io::Result<actix_web::dev::Server> {
-    std::env::set_var("RUST_LOG", "actix_web=info");
-    env_logger::init();
-
-    println!("Server started at {}", HOST);
-
-    let server = HttpServer::new(move || {
-        App::new()
-            .data(schema.clone())
-            .data(ctx.clone())
-            .wrap(middleware::Logger::default())
-            .service(web::resource("/graphql").route(web::post().to(graphql)))
-            .service(web::resource("/graphiql").route(web::get().to(graphiql)))
-    })
-    .bind(HOST)?
-    .run();
-
-    Ok(server)
-}
-
